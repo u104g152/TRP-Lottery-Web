@@ -67,6 +67,14 @@
             text-align: center;
             color: #4B5563;
         }
+        .password-modal-content {
+            background-color: #EFEDD1;
+            padding: 2rem;
+            border-radius: 1.5rem;
+            max-width: 80%;
+            width: 350px;
+            text-align: center;
+        }
     </style>
 </head>
 <body class="bg-[#F2F4E5] flex items-center justify-center min-h-screen p-4">
@@ -111,6 +119,16 @@
         </div>
     </div>
 
+    <!-- Modal for Password -->
+    <div id="passwordModal" class="modal">
+        <div class="password-modal-content relative">
+            <span class="modal-close" onclick="document.getElementById('passwordModal').style.display='none';">&times;</span>
+            <h2 class="text-2xl font-bold mb-4 text-gray-700">請輸入密碼</h2>
+            <input type="password" id="passwordInput" class="w-full prize-input mb-4" placeholder="密碼">
+            <button id="passwordSubmitBtn" class="bg-[#658156] hover:bg-[#7D9B6D] text-white font-bold py-2 px-4 rounded-full w-full">確認</button>
+        </div>
+    </div>
+
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const drawButton = document.getElementById('drawButton');
@@ -120,6 +138,10 @@
             const resultModal = document.getElementById('resultModal');
             const modalCloseButton = document.querySelector('.modal-close');
             const modalPrizeText = document.getElementById('modalPrizeText');
+
+            const passwordModal = document.getElementById('passwordModal');
+            const passwordInput = document.getElementById('passwordInput');
+            const passwordSubmitBtn = document.getElementById('passwordSubmitBtn');
 
             const STORAGE_KEY = 'lottery_prizes_stock';
             
@@ -132,6 +154,9 @@
 
             let prizes = {};
             let totalRemaining = 0;
+
+            // Password for the admin panel
+            const password = '8888';
 
             // Load prize data from localStorage, or use initial data
             function loadPrizes() {
@@ -195,6 +220,7 @@
             // Function to remove a prize
             function removePrize(prizeName) {
                 delete prizes[prizeName];
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(prizes));
                 updateDisplay();
             }
 
@@ -202,6 +228,7 @@
             function addPrize() {
                 const newPrizeName = `新獎項${Object.keys(prizes).length + 1}`;
                 prizes[newPrizeName] = { total: 1, drawn: 0 };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(prizes));
                 updateDisplay();
             }
 
@@ -219,12 +246,12 @@
                     const prizeDrawn = parseInt(drawnInput.value, 10);
                     
                     if (!prizeName || isNaN(prizeTotal) || isNaN(prizeDrawn) || prizeTotal < 0 || prizeDrawn < 0) {
-                        alert('獎項名稱和庫存數量不能為空或負數。');
+                        prizeResult.innerText = '獎項名稱和庫存不能為空。';
                         valid = false;
                         break;
                     }
                     if (prizeDrawn > prizeTotal) {
-                        alert('已抽數量不能大於庫存數量。');
+                        prizeResult.innerText = '已抽數量不能大於庫存。';
                         valid = false;
                         break;
                     }
@@ -239,7 +266,7 @@
                     prizes = newPrizes;
                     localStorage.setItem(STORAGE_KEY, JSON.stringify(prizes));
                     updateDisplay();
-                    alert('設定已儲存！');
+                    prizeResult.innerText = '設定已儲存！';
                     stockSummary.classList.add('hidden');
                     toggleSummaryButton.innerText = '管理獎項與庫存';
                 }
@@ -252,7 +279,7 @@
                 }
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(prizes));
                 updateDisplay();
-                alert('所有已抽數量已清除。');
+                prizeResult.innerText = '所有已抽數量已清除。';
             }
             
             // Function to calculate total remaining prizes
@@ -326,13 +353,26 @@
                 }
             });
 
-            // Event listener for the new toggle button
+            // Event listener for the new toggle button (now shows password modal)
             toggleSummaryButton.addEventListener('click', () => {
-                stockSummary.classList.toggle('hidden');
-                if (stockSummary.classList.contains('hidden')) {
-                    toggleSummaryButton.innerText = '管理獎項與庫存';
+                passwordModal.style.display = 'flex';
+                passwordInput.value = '';
+                passwordInput.focus();
+                prizeResult.innerText = ''; // Clear previous messages
+            });
+
+            // Event listener for password submission
+            passwordSubmitBtn.addEventListener('click', () => {
+                if (passwordInput.value === password) {
+                    passwordModal.style.display = 'none';
+                    stockSummary.classList.toggle('hidden');
+                    if (stockSummary.classList.contains('hidden')) {
+                        toggleSummaryButton.innerText = '管理獎項與庫存';
+                    } else {
+                        toggleSummaryButton.innerText = '隱藏管理介面';
+                    }
                 } else {
-                    toggleSummaryButton.innerText = '隱藏管理介面';
+                    prizeResult.innerText = '密碼錯誤！';
                 }
             });
 
