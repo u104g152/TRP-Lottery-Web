@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>試運氣，抽好禮！</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #F2F4E5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 90%;
+            background-color: #EFEDD1;
+            border-radius: 1.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            padding: 2.5rem;
+            text-align: center;
+            width: 100%;
+            max-width: 600px;
+        }
+        .lottery-image-container {
+            min-height: 8rem;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background-color: #EFEDD1;
+            padding: 1rem;
+            border-radius: 1.5rem;
+            text-align: center;
+            max-width: 80%;
+            width: 300px;
+        }
+        .modal-close {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            font-size: 2rem;
+            cursor: pointer;
+            color: #658156;
+        }
+        .prize-input {
+            background-color: #DFE2CF;
+            border: 1px solid #D8DCC2;
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            text-align: center;
+            color: #4B5563;
+        }
+    </style>
+</head>
+<body class="bg-[#F2F4E5] flex items-center justify-center min-h-screen p-4">
+
+    <div class="container flex flex-col items-center">
+        <img src="https://tektro.com/upload/yddYmenVEIVO8p9HcmLs1758270507.png" 
+             alt="品牌LOGO" 
+             class="w-full mb-4 mx-auto object-contain"
+             onerror="this.src='https://placehold.co/160x160/D8DCC2/64748b?text=LOGO'; this.onerror=null;" />
+
+        <div id="lottery-animation" class="lottery-image-container relative">
+            <img id="lotteryMachineImage" 
+                 src="https://tektro.com/upload/Eg5rmdrI3Bp74YacPiIH1758268697.png" 
+                 alt="抽獎機" 
+                 class="w-40 sm:w-60 object-contain mx-auto" 
+                 onerror="this.src='https://placehold.co/240x240/D8DCC2/64748b?text=扭蛋機'; this.onerror=null;" />
+        </div>
+        
+        <div id="prizeResult" class="text-xl sm:text-3xl font-bold mt-2 text-lime-700 min-h-[4rem] flex items-center justify-center"></div>
+
+        <button id="drawButton" 
+                class="bg-[#658156] hover:bg-[#7D9B6D] text-white font-bold py-3 px-8 rounded-full shadow-lg transition transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed">
+            開始抽獎
+        </button>
+
+        <div class="mt-10 w-full flex flex-col items-center">
+            <button id="toggleSummaryButton" class="text-gray-700 hover:text-gray-900 font-bold mb-4">
+                管理獎項與庫存
+            </button>
+            <div id="stockSummary" class="flex flex-col items-center space-y-2 hidden w-full">
+                <!-- Stock management UI will be rendered here by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Lottery Result -->
+    <div id="resultModal" class="modal">
+        <div class="modal-content relative">
+            <span class="modal-close">&times;</span>
+            <img id="modalPrizeImage" src="https://tektro.com//upload/T3Rpu9dBgxLWL0aJNVch1758271538.png" alt="中獎圖片" class="w-full h-auto mb-4 rounded-lg" onerror="this.src='https://placehold.co/400x400/D8DCC2/64748b?text=中獎了'; this.onerror=null;" />
+            <div id="modalPrizeText" class="text-xl sm:text-3xl font-bold text-lime-700"></div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const drawButton = document.getElementById('drawButton');
+            const prizeResult = document.getElementById('prizeResult');
+            const stockSummary = document.getElementById('stockSummary');
+            const toggleSummaryButton = document.getElementById('toggleSummaryButton');
+            const resultModal = document.getElementById('resultModal');
+            const modalCloseButton = document.querySelector('.modal-close');
+            const modalPrizeText = document.getElementById('modalPrizeText');
+
+            const STORAGE_KEY = 'lottery_prizes_stock';
+            
+            // Initial prize configuration
+            const initialPrizes = {
+                '布織袋': { total: 10, drawn: 0 },
+                '襪子': { total: 10, drawn: 0 },
+                '工具罐': { total: 20, drawn: 0 }
+            };
+
+            let prizes = {};
+            let totalRemaining = 0;
+
+            // Load prize data from localStorage, or use initial data
+            function loadPrizes() {
+                const storedPrizes = JSON.parse(localStorage.getItem(STORAGE_KEY));
+                if (storedPrizes && Object.keys(storedPrizes).length > 0) {
+                    prizes = storedPrizes;
+                } else {
+                    // Deep copy initial prizes to avoid mutation
+                    prizes = JSON.parse(JSON.stringify(initialPrizes)); 
+                }
+                updateDisplay();
+            }
+
+            // Function to update the display of prize stock
+            function updateDisplay() {
+                let summaryHTML = `<div class="w-full space-y-2 mb-4">`;
+                for (const prizeName in prizes) {
+                    const prize = prizes[prizeName];
+                    summaryHTML += `
+                        <div class="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-2 w-full">
+                            <input type="text" class="prize-input flex-grow" value="${prizeName}" data-key="${prizeName}">
+                            <div class="flex items-center space-x-2">
+                                <span class="text-sm">庫存：</span>
+                                <input type="number" class="prize-input w-16" value="${prize.total}" data-key="${prizeName}">
+                                <span class="text-sm">已抽：</span>
+                                <input type="number" class="prize-input w-16" value="${prize.drawn}" data-key="${prizeName}" disabled>
+                                <button class="remove-prize-btn bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-2 rounded" data-key="${prizeName}">移除</button>
+                            </div>
+                        </div>
+                    `;
+                }
+                summaryHTML += `</div>`;
+                summaryHTML += `
+                    <div class="w-full flex flex-col sm:flex-row justify-center items-center space-y-2 sm:space-y-0 sm:space-x-2">
+                        <button id="addPrizeButton" class="bg-[#D8DCC2] hover:bg-[#C1C4AD] text-gray-800 font-bold py-2 px-4 rounded w-full sm:w-auto">新增獎項</button>
+                        <button id="savePrizesButton" class="bg-[#658156] hover:bg-[#7D9B6D] text-white font-bold py-2 px-4 rounded w-full sm:w-auto">儲存設定</button>
+                        <button id="clearDrawnButton" class="bg-[#A7A99D] hover:bg-[#8B8D82] text-gray-800 font-bold py-2 px-4 rounded w-full sm:w-auto">一鍵清除</button>
+                    </div>
+                `;
+                
+                stockSummary.innerHTML = summaryHTML;
+                
+                // Attach event listeners for dynamically added elements
+                document.querySelectorAll('.remove-prize-btn').forEach(button => {
+                    button.addEventListener('click', (e) => removePrize(e.target.dataset.key));
+                });
+                document.getElementById('addPrizeButton').addEventListener('click', addPrize);
+                document.getElementById('savePrizesButton').addEventListener('click', savePrizes);
+                document.getElementById('clearDrawnButton').addEventListener('click', clearDrawnCounts);
+
+                totalRemaining = calculateTotalRemaining();
+                if (totalRemaining <= 0) {
+                    drawButton.disabled = true;
+                    drawButton.innerText = '獎品已全數抽完！';
+                } else {
+                    drawButton.disabled = false;
+                    drawButton.innerText = '開始抽獎';
+                }
+            }
+
+            // Function to remove a prize
+            function removePrize(prizeName) {
+                delete prizes[prizeName];
+                updateDisplay();
+            }
+
+            // Function to add a new prize
+            function addPrize() {
+                const newPrizeName = `新獎項${Object.keys(prizes).length + 1}`;
+                prizes[newPrizeName] = { total: 1, drawn: 0 };
+                updateDisplay();
+            }
+
+            // Function to save the prizes from the UI
+            function savePrizes() {
+                const newPrizes = {};
+                const prizeInputs = document.querySelectorAll('#stockSummary .prize-input');
+                let valid = true;
+                for (let i = 0; i < prizeInputs.length; i += 3) {
+                    const nameInput = prizeInputs[i];
+                    const totalInput = prizeInputs[i + 1];
+                    const drawnInput = prizeInputs[i + 2];
+                    const prizeName = nameInput.value.trim();
+                    const prizeTotal = parseInt(totalInput.value, 10);
+                    const prizeDrawn = parseInt(drawnInput.value, 10);
+                    
+                    if (!prizeName || isNaN(prizeTotal) || isNaN(prizeDrawn) || prizeTotal < 0 || prizeDrawn < 0) {
+                        alert('獎項名稱和庫存數量不能為空或負數。');
+                        valid = false;
+                        break;
+                    }
+                    if (prizeDrawn > prizeTotal) {
+                        alert('已抽數量不能大於庫存數量。');
+                        valid = false;
+                        break;
+                    }
+
+                    newPrizes[prizeName] = { 
+                        total: prizeTotal, 
+                        drawn: prizeDrawn
+                    };
+                }
+
+                if (valid) {
+                    prizes = newPrizes;
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(prizes));
+                    updateDisplay();
+                    alert('設定已儲存！');
+                    stockSummary.classList.add('hidden');
+                    toggleSummaryButton.innerText = '管理獎項與庫存';
+                }
+            }
+
+            // Function to clear all drawn counts
+            function clearDrawnCounts() {
+                for (const prizeName in prizes) {
+                    prizes[prizeName].drawn = 0;
+                }
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(prizes));
+                updateDisplay();
+                alert('所有已抽數量已清除。');
+            }
+            
+            // Function to calculate total remaining prizes
+            function calculateTotalRemaining() {
+                let remaining = 0;
+                for (const prizeName in prizes) {
+                    remaining += prizes[prizeName].total - prizes[prizeName].drawn;
+                }
+                return remaining;
+            }
+
+            // The core lottery logic
+            function drawPrize() {
+                const availablePrizes = Object.keys(prizes).filter(name => prizes[name].total > prizes[name].drawn);
+                
+                if (availablePrizes.length === 0) {
+                    return null;
+                }
+                
+                const totalWeight = availablePrizes.reduce((sum, name) => sum + (prizes[name].total - prizes[name].drawn), 0);
+                let randomNum = Math.random() * totalWeight;
+
+                for (const name of availablePrizes) {
+                    const weight = prizes[name].total - prizes[name].drawn;
+                    if (randomNum < weight) {
+                        return name;
+                    }
+                    randomNum -= weight;
+                }
+            }
+
+            // Event listener for the draw button
+            drawButton.addEventListener('click', () => {
+                if (totalRemaining <= 0) {
+                    prizeResult.innerText = '所有獎項都已抽完。';
+                    return;
+                }
+
+                drawButton.disabled = true;
+                prizeResult.innerText = '抽獎中...';
+
+                setTimeout(() => {
+                    const drawnPrizeName = drawPrize();
+                    if (drawnPrizeName) {
+                        if (prizes[drawnPrizeName]) {
+                            prizes[drawnPrizeName].drawn++;
+                        }
+                        modalPrizeText.innerHTML = `恭喜你抽中：<br/>${drawnPrizeName}！`;
+                        resultModal.style.display = 'flex'; // Show the modal
+                    } else {
+                        modalPrizeText.innerHTML = '沒有抽中任何獎品。';
+                        resultModal.style.display = 'flex';
+                    }
+
+                    // Save the updated state to localStorage
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(prizes));
+                    
+                    updateDisplay();
+                    drawButton.disabled = false;
+                    prizeResult.innerText = ''; // Clear main prize result text
+                }, 1500); // 1.5 seconds delay to simulate animation
+            });
+
+            // Event listeners to close the modal
+            modalCloseButton.addEventListener('click', () => {
+                resultModal.style.display = 'none';
+            });
+            window.addEventListener('click', (event) => {
+                if (event.target === resultModal) {
+                    resultModal.style.display = 'none';
+                }
+            });
+
+            // Event listener for the new toggle button
+            toggleSummaryButton.addEventListener('click', () => {
+                stockSummary.classList.toggle('hidden');
+                if (stockSummary.classList.contains('hidden')) {
+                    toggleSummaryButton.innerText = '管理獎項與庫存';
+                } else {
+                    toggleSummaryButton.innerText = '隱藏管理介面';
+                }
+            });
+
+            // Initial setup
+            loadPrizes();
+        });
+    </script>
+</body>
+</html>
