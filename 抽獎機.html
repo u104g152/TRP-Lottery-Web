@@ -67,14 +67,6 @@
             text-align: center;
             color: #4B5563;
         }
-        .password-modal-content {
-            background-color: #EFEDD1;
-            padding: 2rem;
-            border-radius: 1.5rem;
-            max-width: 80%;
-            width: 350px;
-            text-align: center;
-        }
     </style>
 </head>
 <body class="bg-[#F2F4E5] flex items-center justify-center min-h-screen p-4">
@@ -104,8 +96,27 @@
             <button id="toggleSummaryButton" class="text-gray-700 hover:text-gray-900 font-bold mb-4">
                 管理獎項與庫存
             </button>
-            <div id="stockSummary" class="flex flex-col items-center space-y-2 hidden w-full">
-                <!-- Stock management UI will be rendered here by JavaScript -->
+            <div id="stockSummary" class="flex flex-col items-center space-y-4 hidden w-full">
+                <div class="w-full">
+                    <h2 class="text-2xl font-bold mb-2 text-gray-700">管理獎項</h2>
+                    <input type="text" id="addPrizeName" class="w-full prize-input mb-2" placeholder="輸入獎項名稱">
+                    <button id="addPrizeButton" class="bg-[#D8DCC2] hover:bg-[#C1C4AD] text-gray-800 font-bold py-2 px-4 rounded w-full mb-2">新增獎項</button>
+                    <button id="clearDrawnButton" class="bg-[#A7A99D] hover:bg-[#8B8D82] text-gray-800 font-bold py-2 px-4 rounded w-full">一鍵清除已抽數量</button>
+                </div>
+                <div id="prizesList" class="w-full space-y-2">
+                    <!-- Stock management UI will be rendered here by JavaScript -->
+                </div>
+            </div>
+            <div id="adminModal" class="modal">
+                <div class="modal-content relative">
+                    <span class="modal-close" id="adminModalCloseButton">&times;</span>
+                    <div id="passwordSection">
+                        <h2 class="text-2xl font-bold mb-4 text-gray-700">管理員登入</h2>
+                        <input type="password" id="adminPasswordInput" class="w-full prize-input mb-4" placeholder="請輸入密碼">
+                        <p id="passwordErrorMessage" class="text-sm text-red-500 mb-2 hidden">密碼錯誤，請再試一次。</p>
+                        <button id="submitPasswordButton" class="bg-[#D8DCC2] hover:bg-[#C1C4AD] text-gray-800 font-bold py-2 px-4 rounded w-full">確認</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -113,100 +124,120 @@
     <!-- Modal for Lottery Result -->
     <div id="resultModal" class="modal">
         <div class="modal-content relative">
-            <span class="modal-close">&times;</span>
+            <span class="modal-close" id="resultModalCloseButton">&times;</span>
             <img id="modalPrizeImage" src="https://tektro.com//upload/T3Rpu9dBgxLWL0aJNVch1758271538.png" alt="中獎圖片" class="w-full h-auto mb-4 rounded-lg" onerror="this.src='https://placehold.co/400x400/D8DCC2/64748b?text=中獎了'; this.onerror=null;" />
             <div id="modalPrizeText" class="text-xl sm:text-3xl font-bold text-lime-700"></div>
         </div>
     </div>
 
-    <!-- Modal for Password -->
-    <div id="passwordModal" class="modal">
-        <div class="password-modal-content relative">
-            <span class="modal-close" onclick="document.getElementById('passwordModal').style.display='none';">&times;</span>
-            <h2 class="text-2xl font-bold mb-4 text-gray-700">請輸入密碼</h2>
-            <input type="password" id="passwordInput" class="w-full prize-input mb-4" placeholder="密碼">
-            <button id="passwordSubmitBtn" class="bg-[#658156] hover:bg-[#7D9B6D] text-white font-bold py-2 px-4 rounded-full w-full">確認</button>
-        </div>
-    </div>
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, writeBatch, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    <script>
+        // Global variables, get from environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db, auth;
+        let prizes = {};
+        let totalRemaining = 0;
+
+        // Set admin password
+        const ADMIN_PASSWORD = '123'; // You can change this password to your desired value
+
         document.addEventListener('DOMContentLoaded', () => {
             const drawButton = document.getElementById('drawButton');
             const prizeResult = document.getElementById('prizeResult');
             const stockSummary = document.getElementById('stockSummary');
+            const prizesList = document.getElementById('prizesList');
             const toggleSummaryButton = document.getElementById('toggleSummaryButton');
             const resultModal = document.getElementById('resultModal');
-            const modalCloseButton = document.querySelector('.modal-close');
+            const resultModalCloseButton = document.getElementById('resultModalCloseButton');
             const modalPrizeText = document.getElementById('modalPrizeText');
-
-            const passwordModal = document.getElementById('passwordModal');
-            const passwordInput = document.getElementById('passwordInput');
-            const passwordSubmitBtn = document.getElementById('passwordSubmitBtn');
-
-            const STORAGE_KEY = 'lottery_prizes_stock';
             
-            // Initial prize configuration
-            const initialPrizes = {
-                '布織袋': { total: 10, drawn: 0 },
-                '襪子': { total: 10, drawn: 0 },
-                '工具罐': { total: 20, drawn: 0 }
-            };
+            // Admin interface related DOM elements
+            const adminModal = document.getElementById('adminModal');
+            const adminModalCloseButton = document.getElementById('adminModalCloseButton');
+            const passwordSection = document.getElementById('passwordSection');
+            const adminPasswordInput = document.getElementById('adminPasswordInput');
+            const submitPasswordButton = document.getElementById('submitPasswordButton');
+            const passwordErrorMessage = document.getElementById('passwordErrorMessage');
+            const addPrizeNameInput = document.getElementById('addPrizeName');
+            const addPrizeButton = document.getElementById('addPrizeButton');
+            const clearDrawnButton = document.getElementById('clearDrawnButton');
 
-            let prizes = {};
-            let totalRemaining = 0;
 
-            // Password for the admin panel
-            const password = '8888';
+            if (firebaseConfig) {
+                const firebaseApp = initializeApp(firebaseConfig);
+                auth = getAuth(firebaseApp);
+                db = getFirestore(firebaseApp);
 
-            // Load prize data from localStorage, or use initial data
-            function loadPrizes() {
-                const storedPrizes = JSON.parse(localStorage.getItem(STORAGE_KEY));
-                if (storedPrizes && Object.keys(storedPrizes).length > 0) {
-                    prizes = storedPrizes;
-                } else {
-                    // Deep copy initial prizes to avoid mutation
-                    prizes = JSON.parse(JSON.stringify(initialPrizes)); 
-                }
-                updateDisplay();
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        const userId = user.uid;
+                        console.log("User logged in, ID:", userId);
+                        
+                        // Set up onSnapshot listener to monitor Firestore data changes
+                        const prizesRef = collection(db, `/artifacts/${appId}/public/data/prizes`);
+                        onSnapshot(prizesRef, (snapshot) => {
+                            prizes = {};
+                            snapshot.forEach(doc => {
+                                const data = doc.data();
+                                prizes[doc.id] = { name: data.name, total: data.total, drawn: data.drawn };
+                            });
+                            updateDisplay();
+                        }, (error) => {
+                            console.error("Error listening to prizes: ", error);
+                            prizeResult.innerText = '無法載入獎項，請檢查您的 Firestore 權限設定。';
+                        });
+
+                    } else {
+                        // Handle anonymous login or custom token login
+                        try {
+                            if (initialAuthToken) {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                        } catch (error) {
+                            console.error("Login failed:", error);
+                            prizeResult.innerText = '無法登入，請檢查您的 Firebase 設定。';
+                        }
+                    }
+                });
+            } else {
+                prizeResult.innerText = 'Firebase 設定遺失。';
             }
 
             // Function to update the display of prize stock
             function updateDisplay() {
                 let summaryHTML = `<div class="w-full space-y-2 mb-4">`;
-                for (const prizeName in prizes) {
-                    const prize = prizes[prizeName];
-                    summaryHTML += `
-                        <div class="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-2 w-full">
-                            <input type="text" class="prize-input flex-grow" value="${prizeName}" data-key="${prizeName}">
-                            <div class="flex items-center space-x-2">
-                                <span class="text-sm">庫存：</span>
-                                <input type="number" class="prize-input w-16" value="${prize.total}" data-key="${prizeName}">
-                                <span class="text-sm">已抽：</span>
-                                <input type="number" class="prize-input w-16" value="${prize.drawn}" data-key="${prizeName}" disabled>
-                                <button class="remove-prize-btn bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-2 rounded" data-key="${prizeName}">移除</button>
+                const prizeIds = Object.keys(prizes);
+
+                if (prizeIds.length === 0) {
+                    summaryHTML += '<p class="text-gray-500">目前沒有獎項。</p>';
+                } else {
+                    for (const id of prizeIds) {
+                        const prize = prizes[id];
+                        summaryHTML += `
+                            <div class="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-2 w-full">
+                                <input type="text" class="prize-input flex-grow" value="${prize.name}" data-id="${id}">
+                                <div class="flex items-center space-x-2">
+                                    <span class="text-sm">庫存：</span>
+                                    <input type="number" class="prize-input w-16" value="${prize.total}" data-id="${id}">
+                                    <span class="text-sm">已抽：</span>
+                                    <input type="number" class="prize-input w-16" value="${prize.drawn}" data-id="${id}">
+                                    <button class="remove-prize-btn bg-red-500 hover:bg-red-600 text-white font-bold py-1 px-2 rounded" data-id="${id}">移除</button>
+                                </div>
                             </div>
-                        </div>
-                    `;
+                        `;
+                    }
                 }
                 summaryHTML += `</div>`;
-                summaryHTML += `
-                    <div class="w-full flex flex-col sm:flex-row justify-center items-center space-y-2 sm:space-y-0 sm:space-x-2">
-                        <button id="addPrizeButton" class="bg-[#D8DCC2] hover:bg-[#C1C4AD] text-gray-800 font-bold py-2 px-4 rounded w-full sm:w-auto">新增獎項</button>
-                        <button id="savePrizesButton" class="bg-[#658156] hover:bg-[#7D9B6D] text-white font-bold py-2 px-4 rounded w-full sm:w-auto">儲存設定</button>
-                        <button id="clearDrawnButton" class="bg-[#A7A99D] hover:bg-[#8B8D82] text-gray-800 font-bold py-2 px-4 rounded w-full sm:w-auto">一鍵清除</button>
-                    </div>
-                `;
+                prizesList.innerHTML = summaryHTML;
                 
-                stockSummary.innerHTML = summaryHTML;
-                
-                // Attach event listeners for dynamically added elements
-                document.querySelectorAll('.remove-prize-btn').forEach(button => {
-                    button.addEventListener('click', (e) => removePrize(e.target.dataset.key));
-                });
-                document.getElementById('addPrizeButton').addEventListener('click', addPrize);
-                document.getElementById('savePrizesButton').addEventListener('click', savePrizes);
-                document.getElementById('clearDrawnButton').addEventListener('click', clearDrawnCounts);
-
                 totalRemaining = calculateTotalRemaining();
                 if (totalRemaining <= 0) {
                     drawButton.disabled = true;
@@ -216,168 +247,222 @@
                     drawButton.innerText = '開始抽獎';
                 }
             }
-
-            // Function to remove a prize
-            function removePrize(prizeName) {
-                delete prizes[prizeName];
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(prizes));
-                updateDisplay();
-            }
-
-            // Function to add a new prize
-            function addPrize() {
-                const newPrizeName = `新獎項${Object.keys(prizes).length + 1}`;
-                prizes[newPrizeName] = { total: 1, drawn: 0 };
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(prizes));
-                updateDisplay();
-            }
-
-            // Function to save the prizes from the UI
-            function savePrizes() {
-                const newPrizes = {};
-                const prizeInputs = document.querySelectorAll('#stockSummary .prize-input');
-                let valid = true;
-                for (let i = 0; i < prizeInputs.length; i += 3) {
-                    const nameInput = prizeInputs[i];
-                    const totalInput = prizeInputs[i + 1];
-                    const drawnInput = prizeInputs[i + 2];
-                    const prizeName = nameInput.value.trim();
-                    const prizeTotal = parseInt(totalInput.value, 10);
-                    const prizeDrawn = parseInt(drawnInput.value, 10);
-                    
-                    if (!prizeName || isNaN(prizeTotal) || isNaN(prizeDrawn) || prizeTotal < 0 || prizeDrawn < 0) {
-                        prizeResult.innerText = '獎項名稱和庫存不能為空。';
-                        valid = false;
-                        break;
-                    }
-                    if (prizeDrawn > prizeTotal) {
-                        prizeResult.innerText = '已抽數量不能大於庫存。';
-                        valid = false;
-                        break;
-                    }
-
-                    newPrizes[prizeName] = { 
-                        total: prizeTotal, 
-                        drawn: prizeDrawn
-                    };
+            
+            // Function to remove a prize from Firestore
+            async function removePrize(id) {
+                if (!id) {
+                    console.error("嘗試移除沒有有效 ID 的獎項。");
+                    return;
                 }
+                try {
+                    await deleteDoc(doc(db, `/artifacts/${appId}/public/data/prizes`, id));
+                    prizeResult.innerText = '獎項已移除。';
+                } catch (e) {
+                    console.error("Error removing prize: ", e);
+                    prizeResult.innerText = '移除獎項失敗。';
+                }
+            }
+            
+            // Function to update a prize in Firestore
+            async function updatePrize(id, field, value) {
+                if (!id) {
+                    console.error("嘗試更新沒有有效 ID 的獎項。");
+                    return;
+                }
+                const prizeRef = doc(db, `/artifacts/${appId}/public/data/prizes`, id);
+                await updateDoc(prizeRef, { [field]: value });
+                prizeResult.innerText = '設定已儲存！';
+            }
 
-                if (valid) {
-                    prizes = newPrizes;
-                    localStorage.setItem(STORAGE_KEY, JSON.stringify(prizes));
-                    updateDisplay();
-                    prizeResult.innerText = '設定已儲存！';
-                    stockSummary.classList.add('hidden');
-                    toggleSummaryButton.innerText = '管理獎項與庫存';
+            // Function to add a new prize to Firestore
+            async function addPrize(name) {
+                if (name.trim() === '') {
+                    prizeResult.innerText = '請輸入獎項名稱。';
+                    return;
+                }
+                try {
+                    await addDoc(collection(db, `/artifacts/${appId}/public/data/prizes`), {
+                        name: name.trim(),
+                        total: 1,
+                        drawn: 0
+                    });
+                    addPrizeNameInput.value = '';
+                    prizeResult.innerText = '新獎項已新增！';
+                } catch (e) {
+                    console.error("Error adding prize: ", e);
+                    prizeResult.innerText = '新增獎項失敗。';
                 }
             }
 
-            // Function to clear all drawn counts
-            function clearDrawnCounts() {
-                for (const prizeName in prizes) {
-                    prizes[prizeName].drawn = 0;
+            // Function to clear all drawn counts using a batch write
+            async function clearDrawnCounts() {
+                const batch = writeBatch(db);
+                const prizeIds = Object.keys(prizes);
+
+                for (const id of prizeIds) {
+                    const prizeRef = doc(db, `/artifacts/${appId}/public/data/prizes`, id);
+                    batch.update(prizeRef, { drawn: 0 });
                 }
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(prizes));
-                updateDisplay();
-                prizeResult.innerText = '所有已抽數量已清除。';
+
+                try {
+                    await batch.commit();
+                    prizeResult.innerText = '所有已抽數量已清除。';
+                } catch (e) {
+                    console.error("Error clearing drawn counts: ", e);
+                    prizeResult.innerText = '清除數量失敗。';
+                }
             }
             
             // Function to calculate total remaining prizes
             function calculateTotalRemaining() {
                 let remaining = 0;
-                for (const prizeName in prizes) {
-                    remaining += prizes[prizeName].total - prizes[prizeName].drawn;
+                for (const id in prizes) {
+                    const prize = prizes[id];
+                    remaining += prize.total - prize.drawn;
                 }
                 return remaining;
             }
 
             // The core lottery logic
-            function drawPrize() {
-                const availablePrizes = Object.keys(prizes).filter(name => prizes[name].total > prizes[name].drawn);
+            async function drawPrize() {
+                const availablePrizes = Object.keys(prizes).filter(id => prizes[id].total > prizes[id].drawn);
                 
                 if (availablePrizes.length === 0) {
                     return null;
                 }
                 
-                const totalWeight = availablePrizes.reduce((sum, name) => sum + (prizes[name].total - prizes[name].drawn), 0);
+                const totalWeight = availablePrizes.reduce((sum, id) => sum + (prizes[id].total - prizes[id].drawn), 0);
                 let randomNum = Math.random() * totalWeight;
 
-                for (const name of availablePrizes) {
-                    const weight = prizes[name].total - prizes[name].drawn;
+                let drawnPrizeId = null;
+                for (const id of availablePrizes) {
+                    const weight = prizes[id].total - prizes[id].drawn;
                     if (randomNum < weight) {
-                        return name;
+                        drawnPrizeId = id;
+                        break;
                     }
                     randomNum -= weight;
                 }
+                
+                if (drawnPrizeId) {
+                    const prizeRef = doc(db, `/artifacts/${appId}/public/data/prizes`, drawnPrizeId);
+                    try {
+                        await updateDoc(prizeRef, { drawn: prizes[drawnPrizeId].drawn + 1 });
+                        return prizes[drawnPrizeId].name;
+                    } catch (e) {
+                        console.error("Error updating prize drawn count:", e);
+                        prizeResult.innerText = '更新獎項數量失敗。';
+                        return null;
+                    }
+                }
+                
+                return null;
             }
 
             // Event listener for the draw button
-            drawButton.addEventListener('click', () => {
+            drawButton.addEventListener('click', async () => {
                 if (totalRemaining <= 0) {
                     prizeResult.innerText = '所有獎項都已抽完。';
                     return;
                 }
-
+                
                 drawButton.disabled = true;
                 prizeResult.innerText = '抽獎中...';
 
+                const drawnPrizeName = await drawPrize();
                 setTimeout(() => {
-                    const drawnPrizeName = drawPrize();
                     if (drawnPrizeName) {
-                        if (prizes[drawnPrizeName]) {
-                            prizes[drawnPrizeName].drawn++;
-                        }
                         modalPrizeText.innerHTML = `恭喜你抽中：<br/>${drawnPrizeName}！`;
-                        resultModal.style.display = 'flex'; // Show the modal
                     } else {
                         modalPrizeText.innerHTML = '沒有抽中任何獎品。';
-                        resultModal.style.display = 'flex';
                     }
-
-                    // Save the updated state to localStorage
-                    localStorage.setItem(STORAGE_KEY, JSON.stringify(prizes));
-                    
-                    updateDisplay();
+                    resultModal.style.display = 'flex';
                     drawButton.disabled = false;
-                    prizeResult.innerText = ''; // Clear main prize result text
-                }, 1500); // 1.5 seconds delay to simulate animation
+                    prizeResult.innerText = '';
+                }, 1500);
             });
 
-            // Event listeners to close the modal
-            modalCloseButton.addEventListener('click', () => {
+            // Event listeners for closing modals
+            resultModalCloseButton.addEventListener('click', () => {
                 resultModal.style.display = 'none';
             });
+
+            adminModalCloseButton.addEventListener('click', () => {
+                adminModal.style.display = 'none';
+            });
+
             window.addEventListener('click', (event) => {
                 if (event.target === resultModal) {
                     resultModal.style.display = 'none';
                 }
-            });
-
-            // Event listener for the new toggle button (now shows password modal)
-            toggleSummaryButton.addEventListener('click', () => {
-                passwordModal.style.display = 'flex';
-                passwordInput.value = '';
-                passwordInput.focus();
-                prizeResult.innerText = ''; // Clear previous messages
-            });
-
-            // Event listener for password submission
-            passwordSubmitBtn.addEventListener('click', () => {
-                if (passwordInput.value === password) {
-                    passwordModal.style.display = 'none';
-                    stockSummary.classList.toggle('hidden');
-                    if (stockSummary.classList.contains('hidden')) {
-                        toggleSummaryButton.innerText = '管理獎項與庫存';
-                    } else {
-                        toggleSummaryButton.innerText = '隱藏管理介面';
-                    }
-                } else {
-                    prizeResult.innerText = '密碼錯誤！';
+                if (event.target === adminModal) {
+                    adminModal.style.display = 'none';
                 }
             });
 
-            // Initial setup
-            loadPrizes();
+            // Event listener for the toggle button
+            toggleSummaryButton.addEventListener('click', () => {
+                // If admin interface is open, close it
+                if (!stockSummary.classList.contains('hidden')) {
+                    stockSummary.classList.add('hidden');
+                    return;
+                }
+                // If not open, show password modal
+                adminModal.style.display = 'flex';
+                passwordSection.classList.remove('hidden');
+                adminPasswordInput.value = '';
+                passwordErrorMessage.classList.add('hidden');
+            });
+
+            // Event listener for password submission
+            submitPasswordButton.addEventListener('click', () => {
+                const password = adminPasswordInput.value;
+                if (password === ADMIN_PASSWORD) {
+                    adminModal.style.display = 'none';
+                    stockSummary.classList.remove('hidden');
+                    passwordErrorMessage.classList.add('hidden');
+                } else {
+                    passwordErrorMessage.classList.remove('hidden');
+                }
+            });
+
+            // Using event delegation on the prizesList container for all dynamically added elements
+            prizesList.addEventListener('click', (e) => {
+                if (e.target.classList.contains('remove-prize-btn')) {
+                    const id = e.target.dataset.id;
+                    if (id) {
+                        removePrize(id);
+                    } else {
+                        console.error("嘗試移除沒有有效 ID 的獎項。");
+                    }
+                }
+            });
+            
+            prizesList.addEventListener('change', (e) => {
+                if (e.target.matches('input[type="text"]')) {
+                    const id = e.target.dataset.id;
+                    if (id) {
+                        updatePrize(id, 'name', e.target.value);
+                    } else {
+                        console.error("嘗試更新沒有有效 ID 的獎項名稱。");
+                    }
+                } else if (e.target.matches('input[type="number"]')) {
+                    const id = e.target.dataset.id;
+                    const field = e.target.previousElementSibling.innerText.includes('已抽') ? 'drawn' : 'total';
+                    if (id) {
+                        updatePrize(id, field, parseInt(e.target.value, 10));
+                    } else {
+                        console.error("嘗試更新沒有有效 ID 的獎項數量。");
+                    }
+                }
+            });
+
+            // Event listeners for admin controls
+            addPrizeButton.addEventListener('click', () => {
+                addPrize(addPrizeNameInput.value);
+            });
+            
+            clearDrawnButton.addEventListener('click', clearDrawnCounts);
         });
     </script>
 </body>
