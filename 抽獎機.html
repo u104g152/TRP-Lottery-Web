@@ -88,12 +88,12 @@
         <div id="prizeResult" class="text-xl sm:text-3xl font-bold mt-2 text-lime-700 min-h-[4rem] flex items-center justify-center"></div>
 
         <button id="drawButton" 
-                class="bg-[#658156] hover:bg-[#7D9B6D] text-white font-bold py-3 px-8 rounded-full shadow-lg transition transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                class="bg-[#658156] hover:bg-[#7D9B6D] text-white font-bold py-3 px-8 rounded-full shadow-lg transition transform hover:scale-105 disabled:bg-gray-400 disabled:cursor-not-allowed" disabled>
             開始抽獎
         </button>
 
         <div class="mt-10 w-full flex flex-col items-center">
-            <button id="toggleSummaryButton" class="text-gray-700 hover:text-gray-900 font-bold mb-4">
+            <button id="toggleSummaryButton" class="text-gray-700 hover:text-gray-900 font-bold mb-4" disabled>
                 管理獎項與庫存
             </button>
             <div id="stockSummary" class="flex flex-col items-center space-y-4 hidden w-full">
@@ -134,15 +134,26 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, writeBatch, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Global variables, get from environment
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
+        
+        // 這是您的 Firebase 配置
+        const firebaseConfig = {
+            apiKey: "AIzaSyBmqQ3jzwTlg_Y7D8po1ZgI6JPL_KPLI2o",
+            authDomain: "trp-lottery.firebaseapp.com",
+            projectId: "trp-lottery",
+            storageBucket: "trp-lottery.firebasestorage.app",
+            messagingSenderId: "764728801771",
+            appId: "1:764728801771:web:0d62948a0d54b9161d81ae"
+        };
+        
         let db, auth;
         let prizes = {};
         let totalRemaining = 0;
+        let isFirebaseReady = false;
 
         // Set admin password
         const ADMIN_PASSWORD = '123'; // You can change this password to your desired value
@@ -167,49 +178,61 @@
             const addPrizeNameInput = document.getElementById('addPrizeName');
             const addPrizeButton = document.getElementById('addPrizeButton');
             const clearDrawnButton = document.getElementById('clearDrawnButton');
+            
+            // Function to initialize Firebase
+            function initializeFirebase(config) {
+                try {
+                    // Log the config for debugging
+                    console.log('正在使用以下 Firebase 配置:', config);
+                    console.log('偵測到的初始認證令牌:', initialAuthToken);
 
+                    const firebaseApp = initializeApp(config);
+                    auth = getAuth(firebaseApp);
+                    db = getFirestore(firebaseApp);
+                    setLogLevel('debug');
+                    prizeResult.innerText = '正在連接至 Firebase...';
 
-            if (firebaseConfig) {
-                const firebaseApp = initializeApp(firebaseConfig);
-                auth = getAuth(firebaseApp);
-                db = getFirestore(firebaseApp);
-
-                onAuthStateChanged(auth, async (user) => {
-                    if (user) {
-                        const userId = user.uid;
-                        console.log("User logged in, ID:", userId);
-                        
-                        // Set up onSnapshot listener to monitor Firestore data changes
-                        const prizesRef = collection(db, `/artifacts/${appId}/public/data/prizes`);
-                        onSnapshot(prizesRef, (snapshot) => {
-                            prizes = {};
-                            snapshot.forEach(doc => {
-                                const data = doc.data();
-                                prizes[doc.id] = { name: data.name, total: data.total, drawn: data.drawn };
+                    onAuthStateChanged(auth, async (user) => {
+                        if (user) {
+                            const userId = user.uid;
+                            console.log("使用者已登入，ID:", userId);
+                            isFirebaseReady = true;
+                            drawButton.disabled = false;
+                            toggleSummaryButton.disabled = false;
+                            prizeResult.innerText = '應用程式已準備好，開始抽獎吧！';
+                            
+                            // Set up onSnapshot listener to monitor Firestore data changes
+                            const prizesRef = collection(db, `/artifacts/${appId}/public/data/prizes`);
+                            onSnapshot(prizesRef, (snapshot) => {
+                                prizes = {};
+                                snapshot.forEach(doc => {
+                                    const data = doc.data();
+                                    prizes[doc.id] = { name: data.name, total: data.total, drawn: data.drawn };
+                                });
+                                updateDisplay();
+                            }, (error) => {
+                                console.error("Error listening to prizes: ", error);
+                                prizeResult.innerText = '無法載入獎項，請檢查您的 Firestore 權限設定。';
                             });
-                            updateDisplay();
-                        }, (error) => {
-                            console.error("Error listening to prizes: ", error);
-                            prizeResult.innerText = '無法載入獎項，請檢查您的 Firestore 權限設定。';
-                        });
 
-                    } else {
-                        // Handle anonymous login or custom token login
-                        try {
-                            if (initialAuthToken) {
-                                await signInWithCustomToken(auth, initialAuthToken);
-                            } else {
+                        } else {
+                            // 修正：直接使用匿名登入，避免自訂令牌錯誤
+                            console.log("正在使用匿名登入以確保連線穩定性。");
+                            try {
                                 await signInAnonymously(auth);
+                            } catch (error) {
+                                console.error("登入失敗:", error);
+                                prizeResult.innerText = '無法登入，請檢查您的 Firebase 認證設定。';
                             }
-                        } catch (error) {
-                            console.error("Login failed:", error);
-                            prizeResult.innerText = '無法登入，請檢查您的 Firebase 設定。';
                         }
-                    }
-                });
-            } else {
-                prizeResult.innerText = 'Firebase 設定遺失。';
+                    });
+                } catch (e) {
+                    console.error("Firebase 初始設定失敗:", e);
+                    prizeResult.innerText = `Firebase 初始設定失敗：${e.message}。請檢查您的 Firebase 配置或專案認證設定。`;
+                }
             }
+            
+            initializeFirebase(firebaseConfig);
 
             // Function to update the display of prize stock
             function updateDisplay() {
@@ -250,8 +273,8 @@
             
             // Function to remove a prize from Firestore
             async function removePrize(id) {
-                if (!id) {
-                    console.error("嘗試移除沒有有效 ID 的獎項。");
+                if (!id || !db) {
+                    console.error("嘗試移除沒有有效 ID 的獎項或資料庫未初始化。");
                     return;
                 }
                 try {
@@ -265,8 +288,8 @@
             
             // Function to update a prize in Firestore
             async function updatePrize(id, field, value) {
-                if (!id) {
-                    console.error("嘗試更新沒有有效 ID 的獎項。");
+                if (!id || !db) {
+                    console.error("嘗試更新沒有有效 ID 的獎項或資料庫未初始化。");
                     return;
                 }
                 const prizeRef = doc(db, `/artifacts/${appId}/public/data/prizes`, id);
@@ -276,6 +299,10 @@
 
             // Function to add a new prize to Firestore
             async function addPrize(name) {
+                if (!db) {
+                    prizeResult.innerText = '資料庫未初始化，請先載入 Firebase 配置。';
+                    return;
+                }
                 if (name.trim() === '') {
                     prizeResult.innerText = '請輸入獎項名稱。';
                     return;
@@ -296,6 +323,10 @@
 
             // Function to clear all drawn counts using a batch write
             async function clearDrawnCounts() {
+                if (!db) {
+                    prizeResult.innerText = '資料庫未初始化，請先載入 Firebase 配置。';
+                    return;
+                }
                 const batch = writeBatch(db);
                 const prizeIds = Object.keys(prizes);
 
@@ -325,6 +356,10 @@
 
             // The core lottery logic
             async function drawPrize() {
+                if (!db) {
+                    prizeResult.innerText = '資料庫未初始化，請先載入 Firebase 配置。';
+                    return null;
+                }
                 const availablePrizes = Object.keys(prizes).filter(id => prizes[id].total > prizes[id].drawn);
                 
                 if (availablePrizes.length === 0) {
